@@ -1,7 +1,7 @@
 use async_openai::{Client, config::OpenAIConfig};
 use clap::Parser;
 use serde_json::{Value, json};
-use std::{env, process};
+use std::{env, fs, process};
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -62,8 +62,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("Logs from your program will appear here!");
 
-    if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
-        println!("{}", content);
+    if let Some(choices) = response.get("choices").and_then(|v| v.as_array()) {
+        if let Some(message_obj) = choices
+            .get(0)
+            .and_then(|o| o.get("message"))
+            .and_then(|v| v.as_object())
+        {
+            if let Some(tool_calls) = message_obj.get("tool_calls").and_then(|v| v.as_array())
+                && tool_calls.len() > 0
+            {
+                if let Some(function) = tool_calls
+                    .get(0)
+                    .and_then(|o| o.get("function"))
+                    .and_then(|v| v.as_object())
+                {
+                    if let Some(args) = function.get("arguments").and_then(|s| s.as_str()) {
+                        let args: Value = serde_json::from_str(args)?;
+                        if let Some(file_path) = args.get("file_path").and_then(|o| o.as_str()) {
+                            let contents = fs::read_to_string(file_path)?;
+                            println!("{contents}");
+                        }
+                    }
+                }
+            } else if let Some(contents) = message_obj.get("content").and_then(|s| s.as_str()) {
+                println!("{contents}")
+            }
+        }
     }
 
     Ok(())
