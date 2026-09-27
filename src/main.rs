@@ -1,4 +1,5 @@
 mod agent;
+mod skill;
 mod tools;
 
 use async_openai::{Client, config::OpenAIConfig};
@@ -6,6 +7,8 @@ use clap::Parser;
 use std::{env, process};
 
 use tools::{ToolRegistry, bash::BashTool, read::ReadTool, write::WriteTool};
+
+use crate::skill::SkillParser;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -17,7 +20,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-
+    let skills = SkillParser::parse(".claude/skills").unwrap_or_default();
     let base_url = env::var("OPENROUTER_BASE_URL")
         .unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
 
@@ -38,5 +41,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(BashTool),
     ]);
 
-    agent::run(&client, &args.prompt, &registry).await
+    agent::run(&client, &args.prompt, &registry, skills).await
 }

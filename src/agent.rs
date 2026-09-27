@@ -2,14 +2,27 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use serde_json::{Value, json};
 
-use crate::tools::ToolRegistry;
+use crate::{skill::Skill, tools::ToolRegistry};
 
 pub async fn run(
     client: &Client<OpenAIConfig>,
     prompt: &str,
     registry: &ToolRegistry,
+    skills: Vec<Skill>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": prompt })];
+    let mut messages: Vec<Value> = vec![json!({
+        "role": "user", "content": prompt
+    })];
+
+    for skill in skills {
+        let content = format!(
+            "You have access to the following skills:\n\n- {}: {}",
+            skill.name, skill.description
+        );
+        messages.push(json!({
+            "role": "system", "content": content
+        }));
+    }
 
     loop {
         let payload = json!({
@@ -32,8 +45,7 @@ pub async fn run(
             if let Some(message_obj) = choice.get("message") {
                 messages.push(message_obj.clone());
 
-                if let Some(tool_calls) = message_obj.get("tool_calls").and_then(|v| v.as_array())
-                {
+                if let Some(tool_calls) = message_obj.get("tool_calls").and_then(|v| v.as_array()) {
                     for tool_call in tool_calls {
                         let result = dispatch_tool_call(tool_call, registry).await;
                         let (id, content) = match result {
