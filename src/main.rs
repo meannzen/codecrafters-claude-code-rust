@@ -8,6 +8,7 @@ use std::{env, process};
 
 use tools::{ToolRegistry, bash::BashTool, read::ReadTool, write::WriteTool};
 
+use crate::agent::Agent;
 use crate::skill::SkillParser;
 
 #[derive(Parser)]
@@ -41,5 +42,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(BashTool),
     ]);
 
-    agent::run(&client, &args.prompt, &registry, skills).await
+    let prompt = match &args.prompt {
+        ask_skill if ask_skill.starts_with('/') => {
+            let skill_name = ask_skill.trim_start_matches('/');
+            skills
+                .iter()
+                .find(|s| s.name == skill_name)
+                .map(|s| s.body.clone())
+                .unwrap_or_default()
+        }
+        text => text.to_string(),
+    };
+
+    let agent = Agent::builder()
+        .client(&client)
+        .skills(skills)
+        .registry(&registry)
+        .build();
+
+    agent.run(&prompt).await
 }

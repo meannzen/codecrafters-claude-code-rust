@@ -15,7 +15,7 @@ struct SkillMetadata {
 pub struct Skill {
     pub name: String,
     pub description: String,
-    pub _body: String,
+    pub body: String,
 }
 
 pub struct SkillParser;
@@ -38,7 +38,7 @@ impl SkillParser {
                         skills.push(Skill {
                             name: metadata.name,
                             description: metadata.description,
-                            _body: parsed_file.content,
+                            body: parsed_file.content,
                         });
                     }
                 }
