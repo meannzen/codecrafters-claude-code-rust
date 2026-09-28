@@ -42,17 +42,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(BashTool),
     ]);
 
-    let prompt = match &args.prompt {
-        ask_skill if ask_skill.starts_with('/') => {
-            let skill_name = ask_skill.trim_start_matches('/');
-            skills
-                .iter()
-                .find(|s| s.name == skill_name)
-                .map(|s| s.body.clone())
-                .unwrap_or_default()
-        }
-        text => text.to_string(),
-    };
+    let prompt = SkillParser::resolve_prompt(&args.prompt, &skills).unwrap_or_else(|err| {
+        eprintln!("{err}");
+        process::exit(1);
+    });
 
     let agent = Agent::builder()
         .client(&client)

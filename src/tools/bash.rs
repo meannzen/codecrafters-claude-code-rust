@@ -43,7 +43,7 @@ impl super::Tool for BashTool {
         let mut any_executed = false;
 
         let segments: Vec<&str> = cmd_raw
-            .split(|c| c == ';' || c == '&')
+            .split([';', '&'])
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .collect();
