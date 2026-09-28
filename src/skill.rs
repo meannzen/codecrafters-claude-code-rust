@@ -33,21 +33,36 @@ impl Skill {
 pub struct SkillParser;
 
 impl SkillParser {
-    pub fn resolve_prompt(prompt: &str, skills: &[Skill]) -> Result<String, String> {
-        let Some(rest) = prompt.strip_prefix('/') else {
+    pub fn resolve_prompt_multiple_skills(
+        prompt: &str,
+        skills: &[Skill],
+    ) -> Result<String, String> {
+        if !prompt.starts_with('/') {
             return Ok(prompt.to_string());
-        };
+        }
 
-        let mut parts = rest.split_whitespace();
-        let skill_name = parts.next().unwrap_or_default();
-        let arguments: Vec<String> = parts.map(String::from).collect();
+        let mut skill_names = Vec::new();
+        let mut arguments = Vec::new();
 
-        skills
+        for token in prompt.split_whitespace() {
+            match token.strip_prefix('/') {
+                Some(name) => skill_names.push(name),
+                None => arguments.push(token.to_string()),
+            }
+        }
+
+        skill_names
             .iter()
-            .find(|s| s.name == skill_name)
-            .cloned()
-            .map(|mut s| s.add_arguments(arguments).body)
-            .ok_or_else(|| format!("Unknown skill: /{skill_name}"))
+            .map(|name| {
+                skills
+                    .iter()
+                    .find(|s| s.name == *name)
+                    .cloned()
+                    .map(|mut s| s.add_arguments(arguments.clone()).body)
+                    .ok_or_else(|| format!("Unknown skill: /{name}"))
+            })
+            .collect::<Result<Vec<String>, String>>()
+            .map(|bodies| bodies.join("\n\n"))
     }
 
     pub fn parse<P: AsRef<Path>>(skills_root: P) -> Result<Vec<Skill>, Box<dyn std::error::Error>> {
@@ -80,6 +95,7 @@ impl SkillParser {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     fn skill_with_body(body: &str) -> Skill {
@@ -90,10 +106,17 @@ mod tests {
         }
     }
 
+    fn skill_with_name_body(name: &str, body: &str) -> Skill {
+        Skill {
+            name: name.to_string(),
+            description: "test skill".to_string(),
+            body: body.to_string(),
+        }
+    }
+
     #[test]
     fn replaces_positional_and_arguments_placeholders() {
-        let mut skill =
-            skill_with_body("Deploy to $0 in region $1. Full request was: $ARGUMENTS");
+        let mut skill = skill_with_body("Deploy to $0 in region $1. Full request was: $ARGUMENTS");
 
         let result = skill.add_arguments(vec!["prod".to_string(), "us-east-1".to_string()]);
 
@@ -110,10 +133,7 @@ mod tests {
 
         let result = skill.add_arguments(vec![]);
 
-        assert_eq!(
-            result.body,
-            "Deploy to $0. Full request was: "
-        );
+        assert_eq!(result.body, "Deploy to $0. Full request was: ");
     }
 
     #[test]
@@ -128,18 +148,19 @@ mod tests {
 
     #[test]
     fn resolve_prompt_passes_through_plain_text() {
-        let result = SkillParser::resolve_prompt("hello there", &[]);
+        let result = SkillParser::resolve_prompt_multiple_skills("hello there", &[]);
 
         assert_eq!(result, Ok("hello there".to_string()));
     }
 
     #[test]
     fn resolve_prompt_resolves_skill_with_arguments() {
-        let skills = vec![skill_with_body("Deploy to $0. Full request was: $ARGUMENTS")];
-        let mut named = skills;
-        named[0].name = "deploy".to_string();
+        let skills = vec![skill_with_name_body(
+            "deploy",
+            "Deploy to $0. Full request was: $ARGUMENTS",
+        )];
 
-        let result = SkillParser::resolve_prompt("/deploy prod", &named);
+        let result = SkillParser::resolve_prompt_multiple_skills("/deploy prod", &skills);
 
         assert_eq!(
             result,
@@ -149,8 +170,32 @@ mod tests {
 
     #[test]
     fn resolve_prompt_errors_on_unknown_skill() {
-        let result = SkillParser::resolve_prompt("/missing", &[]);
+        let result = SkillParser::resolve_prompt_multiple_skills("/missing", &[]);
 
         assert_eq!(result, Err("Unknown skill: /missing".to_string()));
+    }
+
+    #[test]
+    fn resolve_prompt_multiple_skills_resolves_each_segment() {
+        let skills = vec![
+            skill_with_name_body("apple", "apple qty: $ARGUMENTS"),
+            skill_with_name_body("fish", "fish is small"),
+        ];
+
+        let result = SkillParser::resolve_prompt_multiple_skills("/apple 11 /fish", &skills);
+
+        assert_eq!(result, Ok("apple qty: 11\n\nfish is small".to_string()));
+    }
+
+    #[test]
+    fn resolve_prompt_multiple_skills_shares_trailing_argument() {
+        let skills = vec![
+            skill_with_name_body("lumen", "nectarine-$ARGUMENTS"),
+            skill_with_name_body("falcon", "kumquat-$ARGUMENTS"),
+        ];
+
+        let result = SkillParser::resolve_prompt_multiple_skills("/lumen /falcon 7781", &skills);
+
+        assert_eq!(result, Ok("nectarine-7781\n\nkumquat-7781".to_string()));
     }
 }

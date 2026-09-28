@@ -42,10 +42,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(BashTool),
     ]);
 
-    let prompt = SkillParser::resolve_prompt(&args.prompt, &skills).unwrap_or_else(|err| {
-        eprintln!("{err}");
-        process::exit(1);
-    });
+    let prompt =
+        SkillParser::resolve_prompt_multiple_skills(&args.prompt, &skills).unwrap_or_else(|err| {
+            eprintln!("{err}");
+            process::exit(1);
+        });
 
     let agent = Agent::builder()
         .client(&client)
