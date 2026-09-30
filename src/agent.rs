@@ -3,7 +3,10 @@ use async_openai::config::OpenAIConfig;
 use futures::future::join_all;
 use serde_json::{Value, json};
 
-use crate::{skill::Skill, tools::ToolRegistry};
+use crate::{
+    skill::{Skill, SkillParser},
+    tools::ToolRegistry,
+};
 
 pub struct Agent<'a> {
     pub client: &'a Client<OpenAIConfig>,
@@ -66,7 +69,7 @@ impl<'a> Agent<'a> {
             }));
         }
 
-        messages.push(json!({ "role": "user", "content": prompt }));
+        messages.push(json!({ "role": "user", "content": SkillParser::resolve_prompt_multiple_skills(prompt, &self.skills)? }));
 
         loop {
             let payload = json!({

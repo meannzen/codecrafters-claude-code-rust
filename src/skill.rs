@@ -2,7 +2,7 @@ use gray_matter::Matter;
 use gray_matter::engine::YAML;
 use serde::Deserialize;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 #[derive(Deserialize)]
@@ -15,10 +15,20 @@ struct SkillMetadata {
 pub struct Skill {
     pub name: String,
     pub description: String,
+    pub dir: PathBuf,
     pub body: String,
 }
 
 impl Skill {
+    pub fn with_location(&self) -> String {
+        format!(
+            "Skill: {} (located at {})\nPaths in the instructions below are relative to that folder.\n\n{}",
+            self.name,
+            self.dir.display(),
+            self.body.trim()
+        )
+    }
+
     pub fn add_arguments(&mut self, arguments: Vec<String>) -> Self {
         self.body = self.body.replace("$ARGUMENTS", &arguments.join(" "));
 
@@ -58,7 +68,7 @@ impl SkillParser {
                     .iter()
                     .find(|s| s.name == *name)
                     .cloned()
-                    .map(|mut s| s.add_arguments(arguments.clone()).body)
+                    .map(|mut s| s.add_arguments(arguments.clone()).with_location())
                     .ok_or_else(|| format!("Unknown skill: /{name}"))
             })
             .collect::<Result<Vec<String>, String>>()
@@ -83,6 +93,7 @@ impl SkillParser {
                     skills.push(Skill {
                         name: metadata.name,
                         description: metadata.description,
+                        dir: path.parent().unwrap_or(Path::new("")).to_path_buf(),
                         body: parsed_file.content,
                     });
                 }
@@ -102,14 +113,22 @@ mod tests {
         Skill {
             name: "test".to_string(),
             description: "test skill".to_string(),
+            dir: PathBuf::from(".claude/skills/test"),
             body: body.to_string(),
         }
+    }
+
+    fn located(name: &str, body: &str) -> String {
+        format!(
+            "Skill: {name} (located at .claude/skills/{name})\nPaths in the instructions below are relative to that folder.\n\n{body}"
+        )
     }
 
     fn skill_with_name_body(name: &str, body: &str) -> Skill {
         Skill {
             name: name.to_string(),
             description: "test skill".to_string(),
+            dir: PathBuf::from(format!(".claude/skills/{name}")),
             body: body.to_string(),
         }
     }
@@ -164,7 +183,7 @@ mod tests {
 
         assert_eq!(
             result,
-            Ok("Deploy to prod. Full request was: prod".to_string())
+            Ok(located("deploy", "Deploy to prod. Full request was: prod"))
         );
     }
 
@@ -184,7 +203,11 @@ mod tests {
 
         let result = SkillParser::resolve_prompt_multiple_skills("/apple 11 /fish", &skills);
 
-        assert_eq!(result, Ok("apple qty: 11\n\nfish is small".to_string()));
+        assert_eq!(result, Ok(format!(
+                "{}\n\n{}",
+                located("apple", "apple qty: 11"),
+                located("fish", "fish is small")
+            )));
     }
 
     #[test]
@@ -196,6 +219,10 @@ mod tests {
 
         let result = SkillParser::resolve_prompt_multiple_skills("/lumen /falcon 7781", &skills);
 
-        assert_eq!(result, Ok("nectarine-7781\n\nkumquat-7781".to_string()));
+        assert_eq!(result, Ok(format!(
+                "{}\n\n{}",
+                located("lumen", "nectarine-7781"),
+                located("falcon", "kumquat-7781")
+            )));
     }
 }

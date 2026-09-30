@@ -4,11 +4,18 @@ use tokio::process::Command;
 
 pub struct BashTool;
 
+fn is_script_execution(cmd: &str) -> bool {
+    let path = cmd.split_whitespace().next().unwrap_or("");
+
+    path.contains('/') && path.ends_with(".sh")
+}
+
 fn is_allowed(seg_norm: &str) -> bool {
     seg_norm == "ls"
         || seg_norm.starts_with("ls ")
         || seg_norm == "rm README_old.md"
         || seg_norm == "rm ./README_old.md"
+        || is_script_execution(seg_norm)
 }
 
 #[async_trait]
