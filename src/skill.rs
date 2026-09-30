@@ -203,11 +203,14 @@ mod tests {
 
         let result = SkillParser::resolve_prompt_multiple_skills("/apple 11 /fish", &skills);
 
-        assert_eq!(result, Ok(format!(
+        assert_eq!(
+            result,
+            Ok(format!(
                 "{}\n\n{}",
                 located("apple", "apple qty: 11"),
                 located("fish", "fish is small")
-            )));
+            ))
+        );
     }
 
     #[test]
@@ -219,10 +222,13 @@ mod tests {
 
         let result = SkillParser::resolve_prompt_multiple_skills("/lumen /falcon 7781", &skills);
 
-        assert_eq!(result, Ok(format!(
+        assert_eq!(
+            result,
+            Ok(format!(
                 "{}\n\n{}",
                 located("lumen", "nectarine-7781"),
                 located("falcon", "kumquat-7781")
-            )));
+            ))
+        );
     }
 }

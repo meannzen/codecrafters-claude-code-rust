@@ -1,5 +1,6 @@
 pub mod bash;
 pub mod read;
+pub mod skill;
 pub mod write;
 
 use async_trait::async_trait;

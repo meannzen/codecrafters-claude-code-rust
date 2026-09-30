@@ -6,7 +6,7 @@ use async_openai::{Client, config::OpenAIConfig};
 use clap::Parser;
 use std::{env, process};
 
-use tools::{ToolRegistry, bash::BashTool, read::ReadTool, write::WriteTool};
+use tools::{ToolRegistry, bash::BashTool, read::ReadTool, skill::SkillTool, write::WriteTool};
 
 use crate::agent::Agent;
 use crate::skill::SkillParser;
@@ -40,6 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(ReadTool),
         Box::new(WriteTool),
         Box::new(BashTool),
+        Box::new(SkillTool::new(skills.clone())),
     ]);
 
     let prompt =

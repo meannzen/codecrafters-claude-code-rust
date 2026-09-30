@@ -3,10 +3,7 @@ use async_openai::config::OpenAIConfig;
 use futures::future::join_all;
 use serde_json::{Value, json};
 
-use crate::{
-    skill::{Skill, SkillParser},
-    tools::ToolRegistry,
-};
+use crate::{skill::Skill, tools::ToolRegistry};
 
 pub struct Agent<'a> {
     pub client: &'a Client<OpenAIConfig>,
@@ -63,13 +60,16 @@ impl<'a> Agent<'a> {
             for skill in &self.skills {
                 sys_content.push_str(&format!("\n- {}: {}", skill.name, skill.description));
             }
+            sys_content.push_str(
+                "\n\nIf a skill matches the user's request, call the Skill tool with its name\nand follow the instructions it returns.",
+            );
             messages.push(json!({
                 "role": "system",
                 "content": sys_content
             }));
         }
 
-        messages.push(json!({ "role": "user", "content": SkillParser::resolve_prompt_multiple_skills(prompt, &self.skills)? }));
+        messages.push(json!({ "role": "user", "content": prompt }));
 
         loop {
             let payload = json!({
@@ -140,6 +140,8 @@ impl<'a> Agent<'a> {
             Some(n) => n,
             None => return (id, "Error: missing function name".to_string()),
         };
+
+        dbg!(function_name);
 
         let args_str = match function_obj.get("arguments").and_then(|v| v.as_str()) {
             Some(a) => a,
