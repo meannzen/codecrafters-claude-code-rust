@@ -2,8 +2,12 @@ use async_openai::Client;
 use async_openai::config::OpenAIConfig;
 use futures::future::join_all;
 use serde_json::{Value, json};
+use std::{future::Future, pin::Pin};
 
 use crate::{skill::Skill, tools::ToolRegistry};
+
+type LoopFuture<'f> =
+    Pin<Box<dyn Future<Output = Result<String, Box<dyn std::error::Error>>> + 'f>>;
 
 pub struct Agent<'a> {
     pub client: &'a Client<OpenAIConfig>,
@@ -71,52 +75,59 @@ impl<'a> Agent<'a> {
 
         messages.push(json!({ "role": "user", "content": prompt }));
 
-        loop {
-            let payload = json!({
-                "messages": messages.clone(),
-                "model": "anthropic/claude-haiku-4.5",
-                "tools": self.registry.definitions()
-            });
+        let answer = self.run_loop(messages).await?;
+        println!("{answer}");
+        Ok(())
+    }
 
-            let response: Value = self.client.chat().create_byot(payload).await?;
+    fn run_loop(&self, mut messages: Vec<Value>) -> LoopFuture<'_> {
+        Box::pin(async move {
+            loop {
+                let payload = json!({
+                    "messages": messages.clone(),
+                    "model": "anthropic/claude-haiku-4.5",
+                    "tools": self.registry.definitions()
+                });
 
-            let choices = match response.get("choices").and_then(|v| v.as_array()) {
-                Some(c) if !c.is_empty() => c,
-                _ => {
-                    eprintln!("No 'choices' array in model response: {:#}", response);
-                    return Ok(());
+                let response: Value = self.client.chat().create_byot(payload).await?;
+
+                let choices = match response.get("choices").and_then(|v| v.as_array()) {
+                    Some(c) if !c.is_empty() => c,
+                    _ => {
+                        eprintln!("No 'choices' array in model response: {:#}", response);
+                        return Ok(String::new());
+                    }
+                };
+
+                let message_obj = match choices[0].get("message") {
+                    Some(m) => m,
+                    None => {
+                        eprintln!("Choice without message: {:#}", choices[0]);
+                        return Ok(String::new());
+                    }
+                };
+
+                messages.push(message_obj.clone());
+
+                if let Some(tool_calls) = message_obj.get("tool_calls").and_then(|v| v.as_array()) {
+                    let dispatch_futures = tool_calls.iter().map(|tc| self.dispatch_tool_call(tc));
+                    let results = join_all(dispatch_futures).await;
+
+                    for (id, content) in results {
+                        messages.push(json!({
+                            "role": "tool",
+                            "tool_call_id": id,
+                            "content": content
+                        }));
+                    }
+                } else if let Some(content) = message_obj.get("content").and_then(|v| v.as_str()) {
+                    return Ok(content.to_string());
+                } else {
+                    eprintln!("Received message without content or tool_calls");
+                    return Ok(String::new());
                 }
-            };
-
-            let message_obj = match choices[0].get("message") {
-                Some(m) => m,
-                None => {
-                    eprintln!("Choice without message: {:#}", choices[0]);
-                    return Ok(());
-                }
-            };
-
-            messages.push(message_obj.clone());
-
-            if let Some(tool_calls) = message_obj.get("tool_calls").and_then(|v| v.as_array()) {
-                let dispatch_futures = tool_calls.iter().map(|tc| self.dispatch_tool_call(tc));
-                let results = join_all(dispatch_futures).await;
-
-                for (id, content) in results {
-                    messages.push(json!({
-                        "role": "tool",
-                        "tool_call_id": id,
-                        "content": content
-                    }));
-                }
-            } else if let Some(content) = message_obj.get("content").and_then(|v| v.as_str()) {
-                println!("{content}");
-                return Ok(());
-            } else {
-                eprintln!("Received message without content or tool_calls");
-                return Ok(());
             }
-        }
+        })
     }
 
     async fn dispatch_tool_call(&self, tool_call: &Value) -> (String, String) {
@@ -141,8 +152,6 @@ impl<'a> Agent<'a> {
             None => return (id, "Error: missing function name".to_string()),
         };
 
-        dbg!(function_name);
-
         let args_str = match function_obj.get("arguments").and_then(|v| v.as_str()) {
             Some(a) => a,
             None => return (id, "Error: missing arguments string".to_string()),
@@ -155,11 +164,45 @@ impl<'a> Agent<'a> {
             }
         };
 
+        if function_name == "Skill"
+            && let Some(skill) = self.forked_skill(&args)
+        {
+            let content = match self.run_subagent(&skill).await {
+                Ok(answer) => format!(
+                    "Skill {} ran in a separate context and returned: {}",
+                    skill.name, answer
+                ),
+                Err(err) => format!("Tool execution failed: {}", err),
+            };
+            return (id, content);
+        }
+
         let content = match self.registry.execute(function_name, &args).await {
             Ok(output) => output,
             Err(err) => format!("Tool execution failed: {}", err),
         };
 
         (id, content)
+    }
+
+    fn forked_skill(&self, args: &Value) -> Option<Skill> {
+        let name = args.get("name").and_then(|v| v.as_str())?;
+        let mut skill = self
+            .skills
+            .iter()
+            .find(|s| s.name == name && s.fork)?
+            .clone();
+        let arguments = args
+            .get("args")
+            .and_then(|v| v.as_str())
+            .map(|a| a.split_whitespace().map(String::from).collect())
+            .unwrap_or_default();
+        skill.add_arguments(arguments);
+        Some(skill)
+    }
+
+    async fn run_subagent(&self, skill: &Skill) -> Result<String, Box<dyn std::error::Error>> {
+        let messages = vec![json!({ "role": "user", "content": skill.with_location() })];
+        self.run_loop(messages).await
     }
 }

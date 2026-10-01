@@ -9,6 +9,7 @@ use walkdir::WalkDir;
 struct SkillMetadata {
     name: String,
     description: String,
+    context: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -16,6 +17,7 @@ pub struct Skill {
     pub name: String,
     pub description: String,
     pub dir: PathBuf,
+    pub fork: bool,
     pub body: String,
 }
 
@@ -93,6 +95,7 @@ impl SkillParser {
                     skills.push(Skill {
                         name: metadata.name,
                         description: metadata.description,
+                        fork: metadata.context.as_deref() == Some("fork"),
                         dir: path.parent().unwrap_or(Path::new("")).to_path_buf(),
                         body: parsed_file.content,
                     });
@@ -113,6 +116,7 @@ mod tests {
         Skill {
             name: "test".to_string(),
             description: "test skill".to_string(),
+            fork: false,
             dir: PathBuf::from(".claude/skills/test"),
             body: body.to_string(),
         }
@@ -128,6 +132,7 @@ mod tests {
         Skill {
             name: name.to_string(),
             description: "test skill".to_string(),
+            fork: false,
             dir: PathBuf::from(format!(".claude/skills/{name}")),
             body: body.to_string(),
         }
