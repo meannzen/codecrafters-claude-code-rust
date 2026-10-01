@@ -75,18 +75,18 @@ impl<'a> Agent<'a> {
 
         messages.push(json!({ "role": "user", "content": prompt }));
 
-        let answer = self.run_loop(messages).await?;
+        let answer = self.run_loop(messages, false).await?;
         println!("{answer}");
         Ok(())
     }
 
-    fn run_loop(&self, mut messages: Vec<Value>) -> LoopFuture<'_> {
+    fn run_loop(&self, mut messages: Vec<Value>, is_subagent: bool) -> LoopFuture<'_> {
         Box::pin(async move {
             loop {
                 let payload = json!({
                     "messages": messages.clone(),
                     "model": "anthropic/claude-haiku-4.5",
-                    "tools": self.registry.definitions()
+                    "tools": self.tool_definitions(is_subagent)
                 });
 
                 let response: Value = self.client.chat().create_byot(payload).await?;
@@ -185,6 +185,14 @@ impl<'a> Agent<'a> {
         (id, content)
     }
 
+    fn tool_definitions(&self, is_subagent: bool) -> Value {
+        let mut defs = self.registry.definitions();
+        if is_subagent && let Some(list) = defs.as_array_mut() {
+            list.retain(|d| d["function"]["name"] != "Skill");
+        }
+        defs
+    }
+
     fn forked_skill(&self, args: &Value) -> Option<Skill> {
         let name = args.get("name").and_then(|v| v.as_str())?;
         let mut skill = self
@@ -202,7 +210,7 @@ impl<'a> Agent<'a> {
     }
 
     async fn run_subagent(&self, skill: &Skill) -> Result<String, Box<dyn std::error::Error>> {
-        let messages = vec![json!({ "role": "user", "content": skill.with_location() })];
-        self.run_loop(messages).await
+        let messages = vec![json!({ "role": "user", "content": skill.body.trim() })];
+        self.run_loop(messages, true).await
     }
 }

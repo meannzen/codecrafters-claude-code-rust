@@ -24,8 +24,7 @@ pub struct Skill {
 impl Skill {
     pub fn with_location(&self) -> String {
         format!(
-            "Skill: {} (located at {})\nPaths in the instructions below are relative to that folder.\n\n{}",
-            self.name,
+            "Base directory for this skill: {}\nRelative paths in the instructions below are relative to this directory.\n\n{}",
             self.dir.display(),
             self.body.trim()
         )
@@ -124,7 +123,7 @@ mod tests {
 
     fn located(name: &str, body: &str) -> String {
         format!(
-            "Skill: {name} (located at .claude/skills/{name})\nPaths in the instructions below are relative to that folder.\n\n{body}"
+            "Base directory for this skill: .claude/skills/{name}\nRelative paths in the instructions below are relative to this directory.\n\n{body}"
         )
     }
 
