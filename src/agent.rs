@@ -1,5 +1,10 @@
-use async_openai::Client;
 use async_openai::config::OpenAIConfig;
+use async_openai::{
+    Client,
+    types::chat::{
+        ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls, CreateChatCompletionResponse,
+    },
+};
 use futures::future::join_all;
 use serde_json::{Value, json};
 use std::{future::Future, pin::Pin};
@@ -89,28 +94,29 @@ impl<'a> Agent<'a> {
                     "tools": self.tool_definitions(is_subagent)
                 });
 
-                let response: Value = self.client.chat().create_byot(payload).await?;
+                let response: CreateChatCompletionResponse =
+                    self.client.chat().create_byot(payload).await?;
 
-                let choices = match response.get("choices").and_then(|v| v.as_array()) {
-                    Some(c) if !c.is_empty() => c,
-                    _ => {
-                        eprintln!("No 'choices' array in model response: {:#}", response);
-                        return Ok(String::new());
-                    }
+                let Some(choice) = response.choices.into_iter().next() else {
+                    eprintln!("No choices in model response");
+                    return Ok(String::new());
                 };
+                let message = choice.message;
 
-                let message_obj = match choices[0].get("message") {
-                    Some(m) => m,
-                    None => {
-                        eprintln!("Choice without message: {:#}", choices[0]);
-                        return Ok(String::new());
-                    }
-                };
+                messages.push(serde_json::to_value(&message)?);
 
-                messages.push(message_obj.clone());
-
-                if let Some(tool_calls) = message_obj.get("tool_calls").and_then(|v| v.as_array()) {
-                    let dispatch_futures = tool_calls.iter().map(|tc| self.dispatch_tool_call(tc));
+                if let Some(tool_calls) = message.tool_calls {
+                    let dispatch_futures = tool_calls.iter().map(|tc| async move {
+                        match tc {
+                            ChatCompletionMessageToolCalls::Function(call) => {
+                                self.dispatch_tool_call(call).await
+                            }
+                            ChatCompletionMessageToolCalls::Custom(call) => (
+                                call.id.clone(),
+                                "Error: custom tool calls are not supported".to_string(),
+                            ),
+                        }
+                    });
                     let results = join_all(dispatch_futures).await;
 
                     for (id, content) in results {
@@ -120,8 +126,8 @@ impl<'a> Agent<'a> {
                             "content": content
                         }));
                     }
-                } else if let Some(content) = message_obj.get("content").and_then(|v| v.as_str()) {
-                    return Ok(content.to_string());
+                } else if let Some(content) = message.content {
+                    return Ok(content);
                 } else {
                     eprintln!("Received message without content or tool_calls");
                     return Ok(String::new());
@@ -130,34 +136,11 @@ impl<'a> Agent<'a> {
         })
     }
 
-    async fn dispatch_tool_call(&self, tool_call: &Value) -> (String, String) {
-        let id = tool_call
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown_id")
-            .to_string();
+    async fn dispatch_tool_call(&self, call: &ChatCompletionMessageToolCall) -> (String, String) {
+        let id = call.id.clone();
+        let function_name = call.function.name.as_str();
 
-        let function_obj = match tool_call.get("function") {
-            Some(f) => f,
-            None => {
-                return (
-                    id,
-                    "Error: missing function object in tool_call".to_string(),
-                );
-            }
-        };
-
-        let function_name = match function_obj.get("name").and_then(|v| v.as_str()) {
-            Some(n) => n,
-            None => return (id, "Error: missing function name".to_string()),
-        };
-
-        let args_str = match function_obj.get("arguments").and_then(|v| v.as_str()) {
-            Some(a) => a,
-            None => return (id, "Error: missing arguments string".to_string()),
-        };
-
-        let args: Value = match serde_json::from_str(args_str) {
+        let args: Value = match serde_json::from_str(&call.function.arguments) {
             Ok(v) => v,
             Err(err) => {
                 return (id, format!("Failed to parse arguments as JSON: {}", err));
