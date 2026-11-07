@@ -24,6 +24,10 @@ impl ToolRegistry {
         Self { tools }
     }
 
+    pub fn add_tool(&mut self, tool: impl Tool + 'static) {
+        self.tools.push(Box::new(tool));
+    }
+
     pub fn definitions(&self) -> Value {
         Value::Array(self.tools.iter().map(|t| t.definition()).collect())
     }

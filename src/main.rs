@@ -1,17 +1,16 @@
-mod agent;
-mod lsp_client;
-mod skill;
-mod tools;
-
 use async_openai::{Client, config::OpenAIConfig};
 use clap::Parser;
 use std::{env, process};
 
-use tools::{ToolRegistry, bash::BashTool, read::ReadTool, skill::SkillTool, write::WriteTool};
-
-use crate::agent::Agent;
-use crate::skill::SkillParser;
-use crate::tools::lsp::LspTool;
+use codecrafters_claude_code::{
+    agent::Agent,
+    lsp_client,
+    skill::SkillParser,
+    tools::{
+        ToolRegistry, bash::BashTool, lsp::LspTool, read::ReadTool, skill::SkillTool,
+        write::WriteTool,
+    },
+};
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -36,17 +35,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_api_base(base_url)
         .with_api_key(api_key);
 
-    let _lsp_client = lsp_client::LspClient::from_environment()?;
-
     let client = Client::with_config(config);
 
-    let registry = ToolRegistry::new(vec![
+    let mut registry = ToolRegistry::new(vec![
         Box::new(ReadTool),
         Box::new(WriteTool),
         Box::new(BashTool),
         Box::new(SkillTool::new(skills.clone())),
-        Box::new(LspTool),
     ]);
+
+    match lsp_client::LspClient::from_environment().await {
+        Ok(lsp_client) => {
+            registry.add_tool(LspTool::new(lsp_client));
+        }
+        Err(e) => {
+            eprintln!("{:?}", e);
+        }
+    };
 
     let prompt =
         SkillParser::resolve_prompt_multiple_skills(&args.prompt, &skills).unwrap_or_else(|err| {
