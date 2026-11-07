@@ -1,4 +1,5 @@
 pub mod bash;
+pub mod lsp;
 pub mod read;
 pub mod skill;
 pub mod write;
@@ -7,6 +8,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 #[async_trait]
+#[allow(clippy::double_must_use)]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn definition(&self) -> Value;

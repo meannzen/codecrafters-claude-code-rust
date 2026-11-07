@@ -1,4 +1,5 @@
 mod agent;
+mod lsp_client;
 mod skill;
 mod tools;
 
@@ -10,6 +11,7 @@ use tools::{ToolRegistry, bash::BashTool, read::ReadTool, skill::SkillTool, writ
 
 use crate::agent::Agent;
 use crate::skill::SkillParser;
+use crate::tools::lsp::LspTool;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -34,6 +36,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_api_base(base_url)
         .with_api_key(api_key);
 
+    let _lsp_client = lsp_client::LspClient::from_environment()?;
+
     let client = Client::with_config(config);
 
     let registry = ToolRegistry::new(vec![
@@ -41,6 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(WriteTool),
         Box::new(BashTool),
         Box::new(SkillTool::new(skills.clone())),
+        Box::new(LspTool),
     ]);
 
     let prompt =
