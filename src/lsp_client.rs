@@ -17,7 +17,7 @@ impl LspClient {
         if std::env::var_os("CODECRAFTERS_LSP_URL").is_none() {
             return Err("CODECRAFTERS_LSP_URL is not set".into());
         }
-        Ok(Self::new().await?)
+        Self::new().await
     }
 
     pub async fn new() -> crate::Result<Self> {
