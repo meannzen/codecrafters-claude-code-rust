@@ -1,9 +1,12 @@
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 use tokio::time::timeout;
+use url::Url;
 
 #[derive(Clone)]
 pub struct LspClient {
@@ -81,5 +84,101 @@ impl LspClient {
         }
 
         Ok(serde_json::from_str(result)?)
+    }
+}
+
+/// Open documents (URI -> last version sent) shared by every tool that talks to the server.
+pub struct LspDocuments {
+    client: LspClient,
+    versions: Mutex<HashMap<String, u32>>,
+}
+
+impl LspDocuments {
+    pub fn new(client: LspClient) -> Self {
+        Self {
+            client,
+            versions: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn client(&self) -> &LspClient {
+        &self.client
+    }
+
+    pub fn supports(&self, path: &Path) -> bool {
+        self.language_id(path).is_some()
+    }
+
+    fn language_id(&self, path: &Path) -> Option<&str> {
+        let ext = path.extension()?.to_str()?;
+        self.client
+            .extension_to_language
+            .get(&format!(".{ext}"))
+            .map(String::as_str)
+    }
+
+    async fn notify(&self, method: &str, params: Value) -> Result<(), String> {
+        let payload = json!({ "method": method, "params": params });
+        self.client
+            .call("notify", &payload)
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("{method} failed: {e:?}"))
+    }
+
+    async fn did_open(&self, path: &Path, uri: &Url, text: &str) -> Result<(), String> {
+        self.notify(
+            "textDocument/didOpen",
+            json!({
+                "textDocument": {
+                    "uri": uri.as_str(),
+                    "languageId": self.language_id(path).unwrap_or("plaintext"),
+                    "version": 1,
+                    "text": text,
+                }
+            }),
+        )
+        .await
+    }
+
+    /// Opens the document from disk if the server has not seen it yet.
+    pub async fn ensure_open(&self, path: &Path, uri: &Url) -> Result<(), String> {
+        let mut versions = self.versions.lock().await;
+        if versions.contains_key(uri.as_str()) {
+            return Ok(());
+        }
+
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+        self.did_open(path, uri, &text).await?;
+        versions.insert(uri.to_string(), 1);
+        Ok(())
+    }
+
+    /// Sends the full saved text: didChange with the next version, or didOpen if not open yet.
+    pub async fn sync_saved(&self, path: &Path, uri: &Url, text: &str) -> Result<(), String> {
+        let mut versions = self.versions.lock().await;
+
+        let version = match versions.get(uri.as_str()).copied() {
+            Some(current) => {
+                let next = current + 1;
+                self.notify(
+                    "textDocument/didChange",
+                    json!({
+                        "textDocument": { "uri": uri.as_str(), "version": next },
+                        "contentChanges": [{ "text": text }],
+                    }),
+                )
+                .await?;
+                next
+            }
+            None => {
+                self.did_open(path, uri, text).await?;
+                1
+            }
+        };
+
+        versions.insert(uri.to_string(), version);
+        Ok(())
     }
 }

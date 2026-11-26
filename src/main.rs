@@ -1,10 +1,10 @@
 use async_openai::{Client, config::OpenAIConfig};
 use clap::Parser;
-use std::{env, process};
+use std::{env, process, sync::Arc};
 
 use codecrafters_claude_code::{
     agent::Agent,
-    lsp_client,
+    lsp_client::{self, LspDocuments},
     skill::SkillParser,
     tools::{
         ToolRegistry, bash::BashTool, lsp::LspTool, read::ReadTool, skill::SkillTool,
@@ -37,21 +37,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = Client::with_config(config);
 
+    let lsp = match lsp_client::LspClient::from_environment().await {
+        Ok(lsp_client) => Some(Arc::new(LspDocuments::new(lsp_client))),
+        Err(e) => {
+            eprintln!("{:?}", e);
+            None
+        }
+    };
+
     let mut registry = ToolRegistry::new(vec![
         Box::new(ReadTool),
-        Box::new(WriteTool),
+        Box::new(WriteTool::new(lsp.clone())),
         Box::new(BashTool),
         Box::new(SkillTool::new(skills.clone())),
     ]);
 
-    match lsp_client::LspClient::from_environment().await {
-        Ok(lsp_client) => {
-            registry.add_tool(LspTool::new(lsp_client));
-        }
-        Err(e) => {
-            eprintln!("{:?}", e);
-        }
-    };
+    if let Some(lsp) = lsp {
+        registry.add_tool(LspTool::new(lsp));
+    }
 
     let prompt =
         SkillParser::resolve_prompt_multiple_skills(&args.prompt, &skills).unwrap_or_else(|err| {

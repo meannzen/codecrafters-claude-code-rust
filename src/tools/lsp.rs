@@ -1,8 +1,6 @@
 use std::{
-    collections::HashSet,
-    fs,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::Arc,
 };
 
 use async_trait::async_trait;
@@ -10,19 +8,15 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use url::Url;
 
-use crate::lsp_client::LspClient;
+use crate::lsp_client::LspDocuments;
 
 pub struct LspTool {
-    lsp_client: LspClient,
-    opened: Mutex<HashSet<String>>,
+    docs: Arc<LspDocuments>,
 }
 
 impl LspTool {
-    pub fn new(lsp_client: LspClient) -> Self {
-        Self {
-            lsp_client,
-            opened: Mutex::new(HashSet::new()),
-        }
+    pub fn new(docs: Arc<LspDocuments>) -> Self {
+        Self { docs }
     }
 }
 
@@ -179,7 +173,8 @@ impl LspTool {
         });
 
         let response = self
-            .lsp_client
+            .docs
+            .client()
             .call("request", &payload)
             .await
             .map_err(|e| format!("textDocument/references failed: {e:?}"))?;
@@ -212,7 +207,8 @@ impl LspTool {
         });
 
         let response = self
-            .lsp_client
+            .docs
+            .client()
             .call("request", &payload)
             .await
             .map_err(|e| format!("textDocument/definition failed: {e:?}"))?;
@@ -231,46 +227,7 @@ impl LspTool {
     }
 
     async fn open_document(&self, path: &Path, uri: &Url) -> Result<(), String> {
-        let newly_opened = self
-            .opened
-            .lock()
-            .map_err(|_| "LSP open-documents lock poisoned".to_string())?
-            .insert(uri.to_string());
-        if !newly_opened {
-            return Ok(());
-        }
-
-        let text = fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
-
-        let language_id = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .and_then(|ext| {
-                self.lsp_client
-                    .extension_to_language
-                    .get(&format!(".{ext}"))
-            })
-            .map(String::as_str)
-            .unwrap_or("plaintext");
-
-        let payload = json!({
-            "method": "textDocument/didOpen",
-            "params": {
-                "textDocument": {
-                    "uri": uri.as_str(),
-                    "languageId": language_id,
-                    "version": 1,
-                    "text": text,
-                }
-            }
-        });
-
-        // Notification failures shouldn't abort the request; just log them.
-        if let Err(e) = self.lsp_client.call("notify", &payload).await {
-            eprintln!("didOpen notification failed: {e:?}");
-        }
-        Ok(())
+        self.docs.ensure_open(path, uri).await
     }
 }
 

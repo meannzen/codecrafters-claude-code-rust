@@ -2,8 +2,20 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::sync::Arc;
+use url::Url;
 
-pub struct WriteTool;
+use crate::lsp_client::LspDocuments;
+
+pub struct WriteTool {
+    lsp: Option<Arc<LspDocuments>>,
+}
+
+impl WriteTool {
+    pub fn new(lsp: Option<Arc<LspDocuments>>) -> Self {
+        Self { lsp }
+    }
+}
 
 #[async_trait]
 impl super::Tool for WriteTool {
@@ -55,6 +67,21 @@ impl super::Tool for WriteTool {
 
         file.write_all(content.as_bytes())
             .map_err(|err| format!("Error writing file: {}", err))?;
+
+        drop(file);
+
+        if let Some(lsp) = &self.lsp {
+            let abs_path = std::env::current_dir()
+                .map_err(|e| format!("Failed to read current directory: {e}"))?
+                .join(file_path);
+            if lsp.supports(&abs_path)
+                && let Ok(uri) = Url::from_file_path(&abs_path)
+            {
+                lsp.sync_saved(&abs_path, &uri, content)
+                    .await
+                    .map_err(|e| format!("File saved, but language server sync failed: {e}"))?;
+            }
+        }
 
         Ok("File written successfully".to_string())
     }
