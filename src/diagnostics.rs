@@ -49,11 +49,12 @@ impl DiagnosticTracker {
         client: &LspClient,
         versions: &HashMap<String, u32>,
         work_dir: &Path,
+        wait_ms: u64,
     ) -> Option<String> {
         let response = client
             .call(
                 "notifications",
-                &json!({ "after": self.cursor, "timeoutMs": 0 }),
+                &json!({ "after": self.cursor, "timeoutMs": wait_ms }),
             )
             .await
             .ok()?;

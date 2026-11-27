@@ -105,12 +105,13 @@ impl LspDocuments {
         }
     }
 
-    /// New, current diagnostics published since the last call, formatted for the model.
-    pub async fn new_diagnostics(&self) -> Option<String> {
+    pub async fn new_diagnostics(&self, wait_ms: u64) -> Option<String> {
         let work_dir = std::env::current_dir().ok()?;
         let versions = self.versions.lock().await;
         let mut tracker = self.diagnostics.lock().await;
-        tracker.collect(&self.client, &versions, &work_dir).await
+        tracker
+            .collect(&self.client, &versions, &work_dir, wait_ms)
+            .await
     }
 
     pub fn client(&self) -> &LspClient {

@@ -62,6 +62,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             process::exit(1);
         });
 
+    let prompt = if args.prompt.starts_with('/') {
+        format!(
+            "I invoked these skills with the slash command `{}`. Each section below is the skill's instructions, which I wrote for this project. Follow every section exactly as written and include all of the lines they ask for in one response.\n\n{}",
+            args.prompt, prompt
+        )
+    } else {
+        prompt
+    };
+
     let agent = Agent::builder()
         .client(&client)
         .skills(skills)
