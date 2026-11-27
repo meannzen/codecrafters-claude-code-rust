@@ -112,7 +112,7 @@ impl super::Tool for LspTool {
             "type": "function",
             "function": {
                 "name": "LSP",
-                "description": "Code intelligence for a symbol at a position. goToDefinition returns where the symbol is defined; findReferences returns every place it is used.",
+                "description": "Code intelligence for a symbol at a position. goToDefinition returns where the symbol is defined; findReferences returns every place it is used. Never guess positions: pass the exact line and character that goToDefinition returned (1-based) to findReferences. Positions shift after edits, so after Write edits run goToDefinition again on a caller (e.g. the call site) to get the updated definition position, then run findReferences at that exact position.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -280,7 +280,10 @@ fn format_location(uri: &str, pos: &Position, work_dir: &Path) -> String {
     let display = display_path(uri, work_dir);
 
     format!(
-        "Defined in {}:{}:{}",
+        "Defined in {}:{}:{} (use filePath {}, line {}, character {} for findReferences; positions are 1-based and change after edits)",
+        display,
+        pos.line + 1,
+        pos.character + 1,
         display,
         pos.line + 1,
         pos.character + 1

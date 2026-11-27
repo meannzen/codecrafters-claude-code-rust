@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod diagnostics;
 pub mod lsp_client;
 pub mod skill;
 pub mod tools;

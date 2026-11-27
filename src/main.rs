@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Box::new(SkillTool::new(skills.clone())),
     ]);
 
-    if let Some(lsp) = lsp {
+    if let Some(lsp) = lsp.clone() {
         registry.add_tool(LspTool::new(lsp));
     }
 
@@ -66,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .client(&client)
         .skills(skills)
         .registry(&registry)
+        .lsp(lsp)
         .build();
 
     agent.run(&prompt).await

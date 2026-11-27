@@ -7,9 +7,9 @@ use async_openai::{
 };
 use futures::future::join_all;
 use serde_json::{Value, json};
-use std::{future::Future, pin::Pin};
+use std::{future::Future, pin::Pin, sync::Arc};
 
-use crate::{skill::Skill, tools::ToolRegistry};
+use crate::{lsp_client::LspDocuments, skill::Skill, tools::ToolRegistry};
 
 type LoopFuture<'f> =
     Pin<Box<dyn Future<Output = Result<String, Box<dyn std::error::Error>>> + 'f>>;
@@ -18,6 +18,7 @@ pub struct Agent<'a> {
     pub client: &'a Client<OpenAIConfig>,
     pub skills: Vec<Skill>,
     pub registry: &'a ToolRegistry,
+    pub lsp: Option<Arc<LspDocuments>>,
 }
 
 #[derive(Default)]
@@ -25,6 +26,7 @@ pub struct AgentBuilder<'a> {
     client: Option<&'a Client<OpenAIConfig>>,
     skills: Vec<Skill>,
     registry: Option<&'a ToolRegistry>,
+    lsp: Option<Arc<LspDocuments>>,
 }
 
 impl<'a> AgentBuilder<'a> {
@@ -47,11 +49,17 @@ impl<'a> AgentBuilder<'a> {
         self
     }
 
+    pub fn lsp(mut self, lsp: Option<Arc<LspDocuments>>) -> Self {
+        self.lsp = lsp;
+        self
+    }
+
     pub fn build(self) -> Agent<'a> {
         Agent {
             client: self.client.expect("AgentBuilder: client is required"),
             skills: self.skills,
             registry: self.registry.expect("AgentBuilder: registry is required"),
+            lsp: self.lsp,
         }
     }
 }
@@ -75,6 +83,13 @@ impl<'a> Agent<'a> {
             messages.push(json!({
                 "role": "system",
                 "content": sys_content
+            }));
+        }
+
+        if self.lsp.is_some() {
+            messages.push(json!({
+                "role": "system",
+                "content": "LSP guidance: never guess line/character for the LSP tool. Use the exact position returned by goToDefinition when calling findReferences. After editing files with Write, positions move: re-run goToDefinition on a caller to get the current definition position, then run findReferences at exactly that position. <new-diagnostics> blocks in tool results are language-server feedback about your edits (possibly in files you did not edit); fix them."
             }));
         }
 
@@ -119,7 +134,18 @@ impl<'a> Agent<'a> {
                     });
                     let results = join_all(dispatch_futures).await;
 
-                    for (id, content) in results {
+                    let diagnostics = match &self.lsp {
+                        Some(lsp) => lsp.new_diagnostics().await,
+                        None => None,
+                    };
+                    let last = results.len().saturating_sub(1);
+                    for (i, (id, mut content)) in results.into_iter().enumerate() {
+                        if i == last
+                            && let Some(d) = &diagnostics
+                        {
+                            content.push_str("\n\n");
+                            content.push_str(d);
+                        }
                         messages.push(json!({
                             "role": "tool",
                             "tool_call_id": id,

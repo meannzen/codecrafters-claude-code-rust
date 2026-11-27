@@ -8,6 +8,8 @@ use tokio::sync::Mutex;
 use tokio::time::timeout;
 use url::Url;
 
+use crate::diagnostics::DiagnosticTracker;
+
 #[derive(Clone)]
 pub struct LspClient {
     address: String,
@@ -91,6 +93,7 @@ impl LspClient {
 pub struct LspDocuments {
     client: LspClient,
     versions: Mutex<HashMap<String, u32>>,
+    diagnostics: Mutex<DiagnosticTracker>,
 }
 
 impl LspDocuments {
@@ -98,7 +101,16 @@ impl LspDocuments {
         Self {
             client,
             versions: Mutex::new(HashMap::new()),
+            diagnostics: Mutex::new(DiagnosticTracker::default()),
         }
+    }
+
+    /// New, current diagnostics published since the last call, formatted for the model.
+    pub async fn new_diagnostics(&self) -> Option<String> {
+        let work_dir = std::env::current_dir().ok()?;
+        let versions = self.versions.lock().await;
+        let mut tracker = self.diagnostics.lock().await;
+        tracker.collect(&self.client, &versions, &work_dir).await
     }
 
     pub fn client(&self) -> &LspClient {

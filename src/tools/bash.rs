@@ -10,12 +10,25 @@ fn is_script_execution(cmd: &str) -> bool {
     path.contains('/') && path.ends_with(".sh")
 }
 
+fn is_unittest(cmd: &str) -> bool {
+    let rest = match cmd.strip_prefix("python3 -m unittest") {
+        Some(r) => r,
+        None => return false,
+    };
+    rest.is_empty()
+        || (rest.starts_with(' ')
+            && rest
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || " ._-/:=".contains(c)))
+}
+
 fn is_allowed(seg_norm: &str) -> bool {
     seg_norm == "ls"
         || seg_norm.starts_with("ls ")
         || seg_norm == "rm README_old.md"
         || seg_norm == "rm ./README_old.md"
         || is_script_execution(seg_norm)
+        || is_unittest(seg_norm)
 }
 
 #[async_trait]
@@ -29,7 +42,7 @@ impl super::Tool for BashTool {
             "type": "function",
             "function": {
                 "name": "Bash",
-                "description": "Execute a shell command (only a small whitelist is allowed)",
+                "description": "Execute a shell command (only a small whitelist is allowed: ls, rm README_old.md, ./*.sh scripts, and `python3 -m unittest ...` to run Python tests)",
                 "parameters": {
                     "type": "object",
                     "required": ["command"],
